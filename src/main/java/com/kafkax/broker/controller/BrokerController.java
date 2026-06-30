@@ -1,5 +1,7 @@
 package com.kafkax.broker.controller;
 
+import com.kafkax.broker.dto.MessageRequest;
+import com.kafkax.broker.dto.TopicRequest;
 import lombok.AllArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -11,6 +13,8 @@ import com.kafkax.broker.model.Message;
 import com.kafkax.broker.service.TopicBrokerService;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Set;
+
 @RestController
 @RequestMapping("/broker")
 @AllArgsConstructor
@@ -18,13 +22,13 @@ public class BrokerController {
 
     private final TopicBrokerService brokerService;
 
-    @PostMapping("/publish")
-    public ResponseEntity<String> publish(@RequestBody PublishRequest request) {
-        brokerService.publish(request.topic(), request.message());
-        return ResponseEntity.ok("Published");
+    @PostMapping("/topics/{topic}/publish")
+    public ResponseEntity<String> publish(@PathVariable String topic, @RequestBody MessageRequest request) {
+        brokerService.publish(topic, request.message());
+        return ResponseEntity.ok("Published message : " + request.message()  );
     }
 
-    @GetMapping("/consume/{topic}")
+    @GetMapping("/topics/{topic}/consume")
     public ResponseEntity<MessageResponse> consume(@PathVariable String topic) {
         Message message = brokerService.consume(topic);
         if (message == null) {
@@ -36,5 +40,22 @@ public class BrokerController {
     @GetMapping("/size/{topic}")
     public Integer size(@PathVariable String topic) {
         return brokerService.topicSize(topic);
+    }
+
+    @PostMapping("/topics")
+    public ResponseEntity<String> createTopic(@RequestBody TopicRequest request) {
+        brokerService.createTopic(request.name());
+        return ResponseEntity.ok("Topic created");
+    }
+
+    @GetMapping("/topics")
+    public ResponseEntity<Set<String>> topics() {
+        return ResponseEntity.ok(brokerService.listTopics());
+    }
+
+    @DeleteMapping("/topics/{topic}")
+    public ResponseEntity<String> deleteTopic(@PathVariable String topic) {
+        brokerService.deleteTopic(topic);
+        return ResponseEntity.ok("Topic deleted");
     }
 }
