@@ -25,7 +25,9 @@ public class TopicBrokerService {
     private final FileStorageService fileStorageService;
 
     private final Map<String, List<Message>> topics = new ConcurrentHashMap<>();
-    Map<String, AtomicLong> topicOffsets;
+    private final Map<String, AtomicLong> topicOffsets = new ConcurrentHashMap<>();
+    private final Object topicLock = new Object();
+    private final Map<String, Map<String, AtomicLong>> consumerOffsets = new ConcurrentHashMap<>();
 
 
     @PostConstruct
@@ -40,7 +42,7 @@ public class TopicBrokerService {
                     String topic = topicDir.getFileName().toString();
                     List<Message> messages = fileStorageService.loadMessages(topic);
                     topics.put(topic, Collections.synchronizedList(messages));
-                    long nextOffset = messages.isEmpty() ? 0 : messages.getLast().offset() + 1;
+                    long nextOffset = messages.isEmpty() ? 0 : messages.get(messages.size() - 1).offset() + 1;
                     topicOffsets.put(topic, new AtomicLong(nextOffset));
                 } catch (Exception ex) {
                     throw new RuntimeException(ex);
@@ -58,21 +60,27 @@ public class TopicBrokerService {
         if (messages == null) {
             throw new TopicNotFoundException(topic);
         }
-        long offset = topicOffsets.get(topic).getAndIncrement();
-        Message message = new Message(offset, payload, Instant.now());
-        messages.add(message);
-        fileStorageService.appendMessage(topic, message);
+        synchronized (topicLock) {
+            long offset = topicOffsets.get(topic).getAndIncrement();
+            Message message = new Message(offset, payload, Instant.now());
+            messages.add(message);
+            fileStorageService.appendMessage(topic, message);
+        }
     }
 
-    public Message consume(String topic, long offset) {
+    public Message consume(String topic, String consumerId) {
         List<Message> messages = topics.get(topic);
-        if (messages == null) {
+        if (Objects.isNull(messages) || messages.isEmpty()) {
             return null;
         }
+        AtomicLong consumerOffset = getConsumerOffset(topic, consumerId);
+        long offset = consumerOffset.get();
         if (offset >= messages.size()) {
             return null;
         }
-        return messages.get((int) offset);
+        Message message = messages.get((int) offset);
+        consumerOffset.incrementAndGet();
+        return message;
     }
 
     public int topicSize(String topic) {
@@ -99,5 +107,10 @@ public class TopicBrokerService {
 
     public Set<String> listTopics() {
         return topics.keySet();
+    }
+
+    private AtomicLong getConsumerOffset(String topic, String consumerId) {
+        consumerOffsets.computeIfAbsent(topic, t -> new ConcurrentHashMap<>());
+        return consumerOffsets.get(topic).computeIfAbsent(consumerId, c -> new AtomicLong(0));
     }
 }

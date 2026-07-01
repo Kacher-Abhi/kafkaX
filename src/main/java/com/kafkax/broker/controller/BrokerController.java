@@ -15,6 +15,8 @@ import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @RestController
 @RequestMapping("/broker")
@@ -26,12 +28,12 @@ public class BrokerController {
     @PostMapping("/topics/{topic}/publish")
     public ResponseEntity<String> publish(@PathVariable String topic, @RequestBody MessageRequest request) throws IOException {
         brokerService.publish(topic, request.message());
-        return ResponseEntity.ok("Published message : " + request.message()  );
+        return ResponseEntity.ok("Published message : " + request.message());
     }
 
     @GetMapping("/topics/{topic}/consume")
-    public ResponseEntity<MessageResponse> consume(@PathVariable String topic, @RequestParam long offset) {
-        Message message = brokerService.consume(topic, offset);
+    public ResponseEntity<MessageResponse> consume(@PathVariable String topic, @RequestParam String consumeId) {
+        Message message = brokerService.consume(topic, consumeId);
         if (message == null) {
             return ResponseEntity.noContent().build();
         }
@@ -59,4 +61,22 @@ public class BrokerController {
         brokerService.deleteTopic(topic);
         return ResponseEntity.ok("Topic deleted");
     }
+
+//    @PostMapping("/test/concurrent")
+//    public String concurrentTest() {
+//        try (ExecutorService executor = Executors.newFixedThreadPool(10)) {
+//            for (int i = 0; i < 1000; i++) {
+//                int finalI = i;
+//                executor.submit(() -> {
+//                    try {
+//                        brokerService.publish("orders", "message-" + finalI);
+//                    } catch (IOException e) {
+//                        throw new RuntimeException(e);
+//                    }
+//                });
+//            }
+//            executor.shutdown();
+//        }
+//        return "Submitted";
+//    }
 }

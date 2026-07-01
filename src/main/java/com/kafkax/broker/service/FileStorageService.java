@@ -18,6 +18,8 @@ import static com.kafkax.broker.utils.Constants.LOG_FILE;
 @Service
 public class FileStorageService {
 
+    private final Object writeLock = new Object();
+
     public void createTopic(String topic) throws IOException {
         Path topicPath = Paths.get(DATA_DIR, topic);
         Files.createDirectories(topicPath);
@@ -29,9 +31,11 @@ public class FileStorageService {
     }
 
     public void appendMessage(String topic, Message message) throws IOException {
-        Path file = Paths.get(DATA_DIR, topic, LOG_FILE);
-        String line = message.offset() + "|" + message.timestamp() + "|" + message.payload() + System.lineSeparator();
-        Files.writeString(file, line, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        synchronized (writeLock) {
+            Path file = Paths.get(DATA_DIR, topic, LOG_FILE);
+            String line = message.offset() + "|" + message.timestamp() + "|" + message.payload() + System.lineSeparator();
+            Files.writeString(file, line, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        }
     }
 
     public List<Message> loadMessages(String topic) throws IOException {
