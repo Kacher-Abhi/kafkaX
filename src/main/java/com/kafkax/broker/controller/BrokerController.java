@@ -13,6 +13,7 @@ import com.kafkax.broker.model.Message;
 import com.kafkax.broker.service.TopicBrokerService;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.IOException;
 import java.util.Set;
 
 @RestController
@@ -23,14 +24,14 @@ public class BrokerController {
     private final TopicBrokerService brokerService;
 
     @PostMapping("/topics/{topic}/publish")
-    public ResponseEntity<String> publish(@PathVariable String topic, @RequestBody MessageRequest request) {
+    public ResponseEntity<String> publish(@PathVariable String topic, @RequestBody MessageRequest request) throws IOException {
         brokerService.publish(topic, request.message());
         return ResponseEntity.ok("Published message : " + request.message()  );
     }
 
     @GetMapping("/topics/{topic}/consume")
-    public ResponseEntity<MessageResponse> consume(@PathVariable String topic) {
-        Message message = brokerService.consume(topic);
+    public ResponseEntity<MessageResponse> consume(@PathVariable String topic, @RequestParam long offset) {
+        Message message = brokerService.consume(topic, offset);
         if (message == null) {
             return ResponseEntity.noContent().build();
         }
@@ -43,7 +44,7 @@ public class BrokerController {
     }
 
     @PostMapping("/topics")
-    public ResponseEntity<String> createTopic(@RequestBody TopicRequest request) {
+    public ResponseEntity<String> createTopic(@RequestBody TopicRequest request) throws IOException {
         brokerService.createTopic(request.name());
         return ResponseEntity.ok("Topic created");
     }
