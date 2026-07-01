@@ -33,7 +33,7 @@ public class TopicBrokerService {
     @PostConstruct
     public void initialize() {
         try {
-            Path dataDir = Paths.get(DATA_DIR);
+            Path dataDir = Paths.get(DATA_DIR, "topics");
             if (!Files.exists(dataDir)) {
                 return;
             }
@@ -79,7 +79,12 @@ public class TopicBrokerService {
             return null;
         }
         Message message = messages.get((int) offset);
-        consumerOffset.incrementAndGet();
+        long nextOffset = consumerOffset.incrementAndGet();
+        try {
+            fileStorageService.saveConsumerOffset(topic, consumerId, nextOffset);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
         return message;
     }
 
@@ -111,6 +116,13 @@ public class TopicBrokerService {
 
     private AtomicLong getConsumerOffset(String topic, String consumerId) {
         consumerOffsets.computeIfAbsent(topic, t -> new ConcurrentHashMap<>());
-        return consumerOffsets.get(topic).computeIfAbsent(consumerId, c -> new AtomicLong(0));
+        return consumerOffsets.get(topic).computeIfAbsent(consumerId, c -> {
+            try {
+                long offset = fileStorageService.loadConsumerOffset(topic, consumerId);
+                return new AtomicLong(offset);
+            } catch (Exception ex) {
+                throw new RuntimeException(ex);
+            }
+        });
     }
 }
