@@ -5,4 +5,5 @@ public class Constants {
     public static final String LOG_FILE = "messages.log";
     public static final String OFFSET_DIR = "offsets";
     public static final String OFFSET = "offset";
+    public static final String PARTITION_PREFIX = "partition-";
 }

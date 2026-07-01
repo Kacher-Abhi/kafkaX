@@ -32,8 +32,8 @@ public class BrokerController {
     }
 
     @GetMapping("/topics/{topic}/consume")
-    public ResponseEntity<MessageResponse> consume(@PathVariable String topic, @RequestParam String consumeId) {
-        Message message = brokerService.consume(topic, consumeId);
+    public ResponseEntity<MessageResponse> consume(@PathVariable String topic, @RequestParam String consumeId, @RequestParam int partition) {
+        Message message = brokerService.consume(topic, partition,consumeId);
         if (message == null) {
             return ResponseEntity.noContent().build();
         }
@@ -47,7 +47,7 @@ public class BrokerController {
 
     @PostMapping("/topics")
     public ResponseEntity<String> createTopic(@RequestBody TopicRequest request) throws IOException {
-        brokerService.createTopic(request.name());
+        brokerService.createTopic(request.name(), request.partitions());
         return ResponseEntity.ok("Topic created");
     }
 

@@ -1,4 +1,4 @@
 package com.kafkax.broker.dto;
 
-public record TopicRequest(String name) {
+public record TopicRequest(String name, Integer partitions) {
 }

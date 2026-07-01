@@ -17,6 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static com.kafkax.broker.utils.Constants.DATA_DIR;
+import static com.kafkax.broker.utils.Constants.PARTITION_PREFIX;
 
 @Service
 @AllArgsConstructor
@@ -24,11 +25,12 @@ public class TopicBrokerService {
 
     private final FileStorageService fileStorageService;
 
-    private final Map<String, List<Message>> topics = new ConcurrentHashMap<>();
+    private final Map<String, Map<Integer, List<Message>>> topics = new ConcurrentHashMap<>();
     private final Map<String, AtomicLong> topicOffsets = new ConcurrentHashMap<>();
     private final Object topicLock = new Object();
     private final Map<String, Map<String, AtomicLong>> consumerOffsets = new ConcurrentHashMap<>();
-
+    private final Map<String, Integer> topicPartitionCount = new ConcurrentHashMap<>();
+    private final Map<String, AtomicLong> partitionSelector = new ConcurrentHashMap<>();
 
     @PostConstruct
     public void initialize() {
@@ -40,15 +42,28 @@ public class TopicBrokerService {
             Files.list(dataDir).filter(Files::isDirectory).forEach(topicDir -> {
                 try {
                     String topic = topicDir.getFileName().toString();
-                    List<Message> messages = fileStorageService.loadMessages(topic);
-                    topics.put(topic, Collections.synchronizedList(messages));
-                    long nextOffset = messages.isEmpty() ? 0 : messages.get(messages.size() - 1).offset() + 1;
-                    topicOffsets.put(topic, new AtomicLong(nextOffset));
+                    Map<Integer, List<Message>> partitions = new ConcurrentHashMap<>();
+                    long highestOffset = -1;
+                    List<Path> partitionFiles = Files.list(topicDir)
+                            .filter(Files::isRegularFile)
+                            .filter(file -> file.getFileName().toString().startsWith(PARTITION_PREFIX)).toList();
+                    for (Path partitionFile : partitionFiles) {
+                        String fileName = partitionFile.getFileName().toString();
+                        int partition = Integer.parseInt(fileName
+                                .replace(PARTITION_PREFIX, "").replace(".log", ""));
+                        List<Message> messages = fileStorageService.loadMessages(topic, partition);
+                        partitions.put(partition, Collections.synchronizedList(messages));
+                        if (!messages.isEmpty()) {
+                            highestOffset = Math.max(highestOffset, messages.get(messages.size() - 1).offset());
+                        }
+                    }
+                    topics.put(topic, partitions);
+                    topicPartitionCount.put(topic, partitions.size());
+                    topicOffsets.put(topic, new AtomicLong(highestOffset + 1));
                 } catch (Exception ex) {
                     throw new RuntimeException(ex);
                 }
             });
-
         } catch (Exception ex) {
             throw new RuntimeException(ex);
         }
@@ -56,24 +71,31 @@ public class TopicBrokerService {
 
 
     public void publish(String topic, String payload) throws IOException {
-        List<Message> messages = topics.get(topic);
-        if (messages == null) {
+        Map<Integer, List<Message>> partitions = topics.get(topic);
+        if (partitions == null) {
             throw new TopicNotFoundException(topic);
         }
         synchronized (topicLock) {
             long offset = topicOffsets.get(topic).getAndIncrement();
+            int partitionCount = topicPartitionCount.get(topic);
+            long next = partitionSelector.computeIfAbsent(topic, t -> new AtomicLong(0)).getAndIncrement();
+            int partition = (int) (next % partitionCount);
             Message message = new Message(offset, payload, Instant.now());
-            messages.add(message);
-            fileStorageService.appendMessage(topic, message);
+            partitions.get(partition).add(message);
+            fileStorageService.appendMessage(topic, partition, message);
         }
     }
 
-    public Message consume(String topic, String consumerId) {
-        List<Message> messages = topics.get(topic);
-        if (Objects.isNull(messages) || messages.isEmpty()) {
+    public Message consume(String topic, int partition, String consumerId) {
+        Map<Integer, List<Message>> topicPartitions = topics.get(topic);
+        if (topicPartitions == null) {
             return null;
         }
-        AtomicLong consumerOffset = getConsumerOffset(topic, consumerId);
+        List<Message> messages = topicPartitions.get(partition);
+        if (messages == null || messages.isEmpty()) {
+            return null;
+        }
+        AtomicLong consumerOffset = getConsumerOffset(topic + "-" + partition, consumerId);
         long offset = consumerOffset.get();
         if (offset >= messages.size()) {
             return null;
@@ -81,7 +103,7 @@ public class TopicBrokerService {
         Message message = messages.get((int) offset);
         long nextOffset = consumerOffset.incrementAndGet();
         try {
-            fileStorageService.saveConsumerOffset(topic, consumerId, nextOffset);
+            fileStorageService.saveConsumerOffset(topic + "-" + partition, consumerId, nextOffset);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -89,16 +111,24 @@ public class TopicBrokerService {
     }
 
     public int topicSize(String topic) {
-        List<Message> queue = topics.get(topic);
-        return queue == null ? 0 : queue.size();
+        Map<Integer, List<Message>> partitions = topics.get(topic);
+        if (partitions == null) {
+            return 0;
+        }
+        return partitions.values().stream().mapToInt(List::size).sum();
     }
 
-    public void createTopic(String topic) throws IOException {
+    public void createTopic(String topic, int partitionCount) throws IOException {
         if (topics.containsKey(topic)) {
             throw new TopicAlreadyExistsException(topic);
         }
-        fileStorageService.createTopic(topic);
-        topics.put(topic, Collections.synchronizedList(new ArrayList<>()));
+        Map<Integer, List<Message>> partitions = new ConcurrentHashMap<>();
+        for (int i = 0; i < partitionCount; i++) {
+            partitions.put(i, Collections.synchronizedList(new ArrayList<>()));
+        }
+        topics.put(topic, partitions);
+        topicPartitionCount.put(topic, partitionCount);
+        fileStorageService.createTopic(topic, partitionCount);
         topicOffsets.put(topic, new AtomicLong(0));
     }
 
